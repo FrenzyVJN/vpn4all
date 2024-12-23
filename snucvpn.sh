@@ -1,5 +1,7 @@
 #!/bin/bash
 
+# Secure WireGuard server installer
+# https://github.com/angristan/wireguard-install
 
 RED='\033[0;31m'
 ORANGE='\033[0;33m'
@@ -12,11 +14,26 @@ function isRoot() {
 		exit 1
 	fi
 }
-
 function removeDNSresolve() {
     # remove DNS resolve
     sudo systemctl stop systemd-resolved
     sudo systemctl disable systemd-resolved
+}
+
+function checkVirt() {
+	if [ "$(systemd-detect-virt)" == "openvz" ]; then
+		echo "OpenVZ is not supported"
+		exit 1
+	fi
+
+	if [ "$(systemd-detect-virt)" == "lxc" ]; then
+		echo "LXC is not supported (yet)."
+		echo "WireGuard can technically run in an LXC container,"
+		echo "but the kernel module has to be installed on the host,"
+		echo "the container has to be run with some specific parameters"
+		echo "and only the tools need to be installed in the container."
+		exit 1
+	fi
 }
 
 function checkOS() {
@@ -85,45 +102,32 @@ function getHomeDirForClient() {
 
 function initialCheck() {
 	isRoot
+	checkVirt
 	checkOS
 }
 
 function installQuestions() {
 	echo "Welcome to the WireGuard installer!"
+	echo "The git repository is available at: https://github.com/angristan/wireguard-install"
 	echo ""
 	echo "I need to ask you a few questions before starting the setup."
 	echo "You can keep the default options and just press enter if you are ok with them."
 	echo ""
 
 	# Detect public IPv4 or IPv6 address and pre-fill for the user
-	SERVER_PUB_IP=$(ip -4 addr | sed -ne 's|^.* inet \([^/]*\)/.* scope global.*$|\1|p' | awk '{print $1}' | head -1)
-	read -rp "IPv4 public address: " -e -i "${SERVER_PUB_IP}" SERVER_PUB_IP
-
+    SERVER_PUB_IP=$(curl -s https://api.ipify.org)
 	# Detect public interface and pre-fill for the user
-	SERVER_NIC="$(ip -4 route ls | grep default | grep -Po '(?<=dev )(\S+)' | head -1)"
-	until [[ ${SERVER_PUB_NIC} =~ ^[a-zA-Z0-9_]+$ ]]; do
-		read -rp "Public interface: " -e -i "${SERVER_NIC}" SERVER_PUB_NIC
-	done
-
-	until [[ ${SERVER_WG_NIC} =~ ^[a-zA-Z0-9_]+$ && ${#SERVER_WG_NIC} -lt 16 ]]; do
-		read -rp "WireGuard interface name: " -e -i wg0 SERVER_WG_NIC
-	done
-
-	until [[ ${SERVER_WG_IPV4} =~ ^([0-9]{1,3}\.){3} ]]; do
-		read -rp "Server WireGuard IPv4: " -e -i 10.66.66.1 SERVER_WG_IPV4
-	done
-
-	until [[ ${SERVER_WG_IPV6} =~ ^([a-f0-9]{1,4}:){3,4}: ]]; do
-		read -rp "Server WireGuard IPv6: " -e -i fd42:42:42::1 SERVER_WG_IPV6
-	done
-
-	# Generate random number within private ports range
+    SERVER_PUB_NIC="eth0"
+    SERVER_WG_NIC="wg0"
+    SERVER_WG_IPV4="10.66.66.1"
+    SERVER_WG_IPV6="fd42:42:42::1"
     SERVER_PORT=53
 
 	# Adguard DNS by default
-    CLIENT_DNS_1 = 1.1.1.1
-    CLIENT_DNS_2 = 1.0.0.1
+    CLIENT_DNS_1="1.1.1.1"
+    CLIENT_DNS_2="1.0.0.1"
     ALLOWED_IPS="0.0.0.0/0,::/0"
+
 
 	echo ""
 	echo "Okay, that was all I needed. We are ready to setup your WireGuard server now."
@@ -233,7 +237,10 @@ net.ipv6.conf.all.forwarding = 1" >/etc/sysctl.d/wg.conf
 	# Check if WireGuard is running
 	systemctl is-active --quiet "wg-quick@${SERVER_WG_NIC}"
 	WG_RUNNING=$?
-
+    systemctl stop systemd-resolved
+    systemctl disable systemd-resolved
+    systemctl restart "wg-quick@${SERVER_WG_NIC}"
+    systemctl start systemd-resolved
 	# WireGuard might not work if we updated the kernel. Tell the user to reboot
 	if [[ ${WG_RUNNING} -ne 0 ]]; then
 		echo -e "\n${RED}WARNING: WireGuard does not seem to be running.${NC}"
