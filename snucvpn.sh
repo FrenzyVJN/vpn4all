@@ -7,8 +7,10 @@ RED='\033[0;31m'
 ORANGE='\033[0;33m'
 GREEN='\033[0;32m'
 NC='\033[0m'
-
+SERVER_PUB_IP=""
 function isRoot() {
+	SERVER_PUB_IP = "curl ifconfig.me"
+
 	if [ "${EUID}" -ne 0 ]; then
 		echo "You need to run this script as root"
 		exit 1
@@ -96,16 +98,18 @@ function installQuestions() {
 	echo ""
 
 	# Detect public IPv4 or IPv6 address and pre-fill for the user
-	SERVER_PUB_IP=$(ip -4 addr | sed -ne 's|^.* inet \([^/]*\)/.* scope global.*$|\1|p' | awk '{print $1}' | head -1)
-	if [[ -z ${SERVER_PUB_IP} ]]; then
-		# Detect public IPv6 address
-		SERVER_PUB_IP=$(ip -6 addr | sed -ne 's|^.* inet6 \([^/]*\)/.* scope global.*$|\1|p' | head -1)
+	SERVER_PUB_IP=$(curl ifconfig.me)
+	if [ -z "$SERVER_PUB_IP" ]; then
+		echo -e "${RED}Unable to retrieve the public IP automatically.${NC}"
+		read -rp "Please enter your server's public IP: " SERVER_PUB_IP
 	fi
-	read -rp "IPv4 or IPv6 public address: " -e -i "${SERVER_PUB_IP}" SERVER_PUB_IP
+
+	echo "Public IP: ${SERVER_PUB_IP}"
+
 	# Detect public interface and pre-fill for the user
     SERVER_PUB_NIC="eth0"
     SERVER_WG_NIC="wg0"
-    SERVER_WG_IPV4="10.66.66.1"
+    SERVER_WG_IPV4="10.10.10.1"
     SERVER_WG_IPV6="fd42:42:42::1"
     SERVER_PORT=53
 
@@ -442,8 +446,8 @@ function uninstallWg() {
 }
 
 function manageMenu() {
-	echo "Welcome to WireGuard-install!"
-	echo "The git repository is available at: https://github.com/angristan/wireguard-install"
+	echo "Welcome to FrenzyVPN!"
+	echo "The git repository is available at: https://github.com/FrenzyVJN/vpn4all"
 	echo ""
 	echo "It looks like WireGuard is already installed."
 	echo ""
@@ -475,10 +479,8 @@ function manageMenu() {
 	esac
 }
 
-# Check for root, virt, OS...
 initialCheck
 
-# Check if WireGuard is already installed and load params
 if [[ -e /etc/wireguard/params ]]; then
 	source /etc/wireguard/params
 	manageMenu
