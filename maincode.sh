@@ -19,6 +19,23 @@ function removeDNSresolve() {
     sudo systemctl stop systemd-resolved
     sudo systemctl disable systemd-resolved
 }
+
+function checkVirt() {
+	if [ "$(systemd-detect-virt)" == "openvz" ]; then
+		echo "OpenVZ is not supported"
+		exit 1
+	fi
+
+	if [ "$(systemd-detect-virt)" == "lxc" ]; then
+		echo "LXC is not supported (yet)."
+		echo "WireGuard can technically run in an LXC container,"
+		echo "but the kernel module has to be installed on the host,"
+		echo "the container has to be run with some specific parameters"
+		echo "and only the tools need to be installed in the container."
+		exit 1
+	fi
+}
+
 function checkOS() {
 	source /etc/os-release
 	OS="${ID}"
@@ -85,6 +102,7 @@ function getHomeDirForClient() {
 
 function initialCheck() {
 	isRoot
+	checkVirt
 	checkOS
 }
 
@@ -396,7 +414,7 @@ function uninstallWg() {
 
 		systemctl stop "wg-quick@${SERVER_WG_NIC}"
 		systemctl disable "wg-quick@${SERVER_WG_NIC}"
-		systemctl restart systemd-resolved
+
 		if [[ ${OS} == 'ubuntu' ]]; then
 			apt-get remove -y wireguard wireguard-tools qrencode
 		elif [[ ${OS} == 'debian' ]]; then
