@@ -9,12 +9,42 @@ GREEN='\033[0;32m'
 NC='\033[0m'
 SERVER_PUB_IP=""
 function isRoot() {
-	SERVER_PUB_IP = "curl ifconfig.me"
-
 	if [ "${EUID}" -ne 0 ]; then
 		echo "You need to run this script as root"
 		exit 1
 	fi
+}
+function fixDNSresolve(){
+	RESOLVED_CONF="/etc/systemd/resolved.conf"
+
+	# Backup the original file
+	sudo cp "$RESOLVED_CONF" "${RESOLVED_CONF}.backup.$(date +%F_%T)"
+
+	# Ensure the [Resolve] section exists, or add it if missing
+	if ! grep -q "^\[Resolve\]" "$RESOLVED_CONF"; then
+		echo "[Resolve]" | sudo tee -a "$RESOLVED_CONF" > /dev/null
+	fi
+
+	# Add or update the DNSStubListenerExtra line
+	if grep -q "^DNSStubListenerExtra=" "$RESOLVED_CONF"; then
+		# Update existing line
+		sudo sed -i 's/^DNSStubListenerExtra=.*/DNSStubListenerExtra=127.0.0.1:5353/' "$RESOLVED_CONF"
+	else
+		# Append the line under [Resolve]
+		sudo sed -i '/^\[Resolve\]/a DNSStubListenerExtra=127.0.0.1:5353' "$RESOLVED_CONF"
+	fi
+
+	# Ensure DNSStubListener=no is present
+	if ! grep -q "^DNSStubListener=no" "$RESOLVED_CONF"; then
+		sudo sed -i '/^\[Resolve\]/a DNSStubListener=no' "$RESOLVED_CONF"
+	fi
+
+	# Restart systemd-resolved to apply changes
+	sudo systemctl restart systemd-resolved
+
+	# Provide feedback
+	echo "The /etc/systemd/resolved.conf has been updated and systemd-resolved restarted."
+
 }
 function removeDNSresolve() {
     # remove DNS resolve
@@ -91,9 +121,9 @@ function initialCheck() {
 }
 
 function installQuestions() {
-	echo "Welcome to the WireGuard installer!"
+	echo "Welcome to the FrenzyVPN install :)!"
 	echo ""
-	echo "I need to ask you a few questions before starting the setup."
+	echo "I have already answered the questions asked :)."
 	echo "You can keep the default options and just press enter if you are ok with them."
 	echo ""
 
@@ -218,19 +248,21 @@ net.ipv6.conf.all.forwarding = 1" >/etc/sysctl.d/wg.conf
 
 	sysctl --system
 
-	systemctl start "wg-quick@${SERVER_WG_NIC}"
-	systemctl enable "wg-quick@${SERVER_WG_NIC}"
+	systemctl start "wg-quick@${SERVER_WG_NIC}" --quiet
+	systemctl enable "wg-quick@${SERVER_WG_NIC}" --quiet
 
 	newClient
 	echo -e "${GREEN}If you want to add more clients, you simply need to run this script another time!${NC}"
 
 	# Check if WireGuard is running
-	systemctl is-active --quiet "wg-quick@${SERVER_WG_NIC}"
-	WG_RUNNING=$?
     systemctl stop systemd-resolved
     systemctl disable systemd-resolved
     systemctl restart "wg-quick@${SERVER_WG_NIC}"
+	fixDNSresolve
     systemctl start systemd-resolved
+	systemctl is-active --quiet "wg-quick@${SERVER_WG_NIC}"
+	WG_RUNNING=$?
+
 	# WireGuard might not work if we updated the kernel. Tell the user to reboot
 	if [[ ${WG_RUNNING} -ne 0 ]]; then
 		echo -e "\n${RED}WARNING: WireGuard does not seem to be running.${NC}"
